@@ -24,12 +24,12 @@ filterwarnings('ignore', category=RuntimeWarning)
 parser = argparse.ArgumentParser()
 
 # INPUT
-parser.add_argument('-traj', '--traj', dest='traj', required=True, nargs='+',
+parser.add_argument('-traj', '--trajectory', dest='traj', required=True, nargs='+',
                     help='!REQUIRED! MD trajectory-file name in the MD-output-directory. '\
                     'Format is also used for output-files.',
                     type=str)
     
-parser.add_argument('-topo', '--topo', dest='topo', default=None,
+parser.add_argument('-topo', '--topology', dest='topo', default=None,
                     help='MD topology-file name in the MD-output-directory, '\
                     'if trajectory-file does not specify topology. DEFAULT: None.',
                     type=str)
@@ -39,11 +39,11 @@ parser.add_argument('-fes', '--fes', dest='fes', default=None,
                     'DEFAULT: None',
                     type=str)
 
-parser.add_argument('-colv', '--colv', dest='colvar', default='COLVAR', nargs='+',
+parser.add_argument('-cv', '--colvar', dest='colvar', default='COLVAR', nargs='+',
                     help='COLVAR-file in the MD-output-directory. DEFAULT: "COLVAR".',
                     type=str)
 
-parser.add_argument('-column, --column', dest='column', default=None,
+parser.add_argument('-col, --column', dest='column', default=None,
                     help='Columns for CV1;CV2 (colvar) or CV1;CV2;Energy (fes). Expects 2 integers '\
                         '(custom colvar columns), 3 integers (custom fes columns) or 5 integers (custom colvar and fes) '\
                             'delimited by commas. DEFAULT: "1,2 and 1,2,3"')
@@ -387,10 +387,10 @@ def printout_custom(i):
     end = 'cfg' if format == 'cfg' else 'pdb'
     linecount, printcount = 0, 0
     with open(f'minima/min_{i}.'+end, 'w') as minfile:
-        for element in args.traj:
-            with open(element, 'r') as ftraj:
-                with tqdm.tqdm(total=len(sorted_indx[i]), desc=f'writing min {i}', 
+        with tqdm.tqdm(total=len(sorted_indx[i]), desc=f'writing min {i}', 
                 position=tqdm.tqdm._get_free_pos()+i, leave=False) as pbar:
+            for element in args.traj:
+                with open(element, 'r') as ftraj:
                     for line in ftraj:
                         try:
                             if sorted_indx[i][printcount] == linecount:
@@ -402,7 +402,6 @@ def printout_custom(i):
                             break
                         if line.startswith('END'):
                             linecount += 1
-
 
 
 def get_linecount(filelist):
@@ -669,10 +668,8 @@ if __name__ == '__main__':
         plt.ylabel('CV2 [a.U.]')
         plt.axis('tight')
         plt.title(f'threshold: {round(args.thresh,3)} a.U.')
-        #plt.plot(outl_vis[:,0], outl_vis[:,1], '.', color='white', markersize=2)
         for i in range(len(exteriors_x)):
             plt.plot(exteriors_x[i], exteriors_y[i], '.', color='white', ms=2)
-
         cb = plt.colorbar(label='free energy [a.U.]', format="{x:.0f}")
         tick_locator = ticker.MaxNLocator(nbins=8)
         cb.locator = tick_locator
@@ -691,7 +688,7 @@ if __name__ == '__main__':
         for i in tqdm.tqdm(range(len(sorted_indx)), desc='printing to file', leave=False):
             printout(i)
     else:
-        with mp.Pool(processes = usable_cpu, initializer=init_custom_writer, initargs=(sorted_indx,format,mp.RLock(),)) as pool:
+        with mp.Pool(processes = usable_cpu, initializer=init_custom_writer, initargs=(sorted_indx,format,mp.RLock())) as pool:
             pool.map(printout_custom, range(len(sorted_indx)))
 
     print(f'time needed for postprocessing step: {round(perf_counter() - start3,3)} s\n')
