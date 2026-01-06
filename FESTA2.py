@@ -5,8 +5,8 @@ import tqdm
 import multiprocessing as mp
 import matplotlib.pyplot as plt
 import argparse
-import subprocess
 
+from subprocess import run
 from time import perf_counter
 from copy import deepcopy
 from operator import countOf
@@ -16,7 +16,7 @@ from itertools import count
 from matplotlib import ticker
 from MDAnalysis import Universe
 from collections import defaultdict
-
+from sys import exit
 
 filterwarnings('ignore', category=UserWarning)
 filterwarnings('ignore', category=RuntimeWarning)
@@ -68,9 +68,9 @@ parser.add_argument('-stride', '--stride', dest='stride', default=1,
                     help='Reads only every n-th frame of trajectory. DEFAULT: 1.',
                     type=int)
 
-parser.add_argument('-png', '--png', dest='fes_png', default='True', choices=('True','False'),
-                    help='Specifies whether a PNG-visualization of the FES should be created. '\
-                    'Expects True/False. DEFAULT: True.',
+parser.add_argument('-png', '--png', dest='fes_png', default='True', choices=('True','False','only'),
+                    help='Specifies whether a PNG-visualization of the FES should be created (True/False) '\
+                    'or if only a PNG is desired (only). DEFAULT: True.',
                     type=str)
     
 parser.add_argument('-dim', '--dim', dest='dims', default='500,500',
@@ -105,7 +105,7 @@ def det_min_frames(j):
     try:
         if abs(1-(polygon.area/convex_hull.area)) > 0.4:
             polygon = convex_hull
-            print(f'polygon {j} did not initialize properly, using convex-hull')
+            stdout(f'polygon {j} did not initialize properly, using convex-hull')
     except ZeroDivisionError:
         pass
 
@@ -404,40 +404,32 @@ def printout_custom(i):
                             linecount += 1
 
 
-def get_linecount(filelist):
-    line_count = 0
-    for filename in filelist:
-        try:
-            output = subprocess.Popen(['wc', '-l', filename], stdout=subprocess.PIPE).communicate()[0]
-            line_count += int(output.decode('utf-8').split()[0])
-        except FileNotFoundError:
-            with open(filename, 'rb') as bfile:
-                line_count += sum(1 for _ in bfile)
-    return line_count
+def printout_prework(end):
+    lookstr = 'BEGIN_CFG' if end == 'cfg' else 'END'
+    totalframes = 0
+    try:
+        for filename in args.traj:
+            output = run(['grep','-c',f'^{lookstr}',filename], shell=False, capture_output=True, text=True)
+            totalframes += int(output.stdout)
+    except FileNotFoundError:
+        for filename in args.traj:
+            with open(filename,'r') as f:
+                for line in f:
+                    if line.startswith(lookstr):
+                        totalframes += 1
+    return totalframes
 
 
-def printout_pdb_cp2k_prework():
-    line_count = get_linecount(args.traj)
-    with open(args.traj[0], 'r') as tfile:
-        atom_count, head = 0, 0
-        for line in tfile:
-            if line.startswith('ATOM'):
-                atom_count += 1
-            elif line.startswith('END'):
-                break
-            elif line.startswith('AUTHOR') or line.startswith('TITLE'):
-                head += 1
-    return int((line_count-head)/(atom_count+3))
-
-
-def printout_cfg_prework():
-    line_count = get_linecount(args.traj)
-    with open(args.traj[0], 'r') as tfile:
-        for i,line in enumerate(tfile):
-            if line.startswith('END_CFG'):
-                per_frame = i+2
-                break
-    return int(line_count/per_frame)
+def stdout(string, center=False, end='\n', start=''):
+    try:
+        terminal_size = os.get_terminal_size()[0]
+    except OSError:
+        terminal_size = len(string)
+    if not center:
+        print(start+string+(terminal_size-len(string))*' ', end=end, flush=True)
+    else:
+        tempstr = ' '*int((terminal_size-len(string+start))/2)
+        print(start+tempstr+string+tempstr, flush=True)
 
 
 if __name__ == '__main__':
@@ -446,13 +438,9 @@ if __name__ == '__main__':
     termin = '.: terminated successfully :.'
     version = '.: histogram-capable version :.'
 
-    try:
-        terminal_size = os.get_terminal_size()[0]
-    except OSError:
-        terminal_size = len(title)
-    print('\n'+' '*int((terminal_size-len(title))/2) + title + ' '*int((terminal_size-len(title))/2))
-    print(' '*int((terminal_size-len(version))/2) + version + ' '*int((terminal_size-len(version))/2))
-    print(f'\nworking directory: {args.md_dir}')
+    stdout(title, center=True, start='\n')
+    stdout(version, center=True)
+    stdout(f'working directory: {args.md_dir}', start='\n')
     os.chdir(args.md_dir)
 
     pos_cvs_fes = (0,1)
@@ -490,10 +478,10 @@ if __name__ == '__main__':
     if args.thresh == None:
         if not args.fes == None:
             args.thresh = np.max(ener2d) - abs(np.max(ener2d)-np.min(ener2d))*(1-1/12)
-            print('automatically determined', end =' ') 
+            stdout('automatically determined', end=' ') 
         else:
             raise Exception('Cannot use automatic threshold detection with histogram mode')
-    print(f'threshold value: {round(args.thresh,3)} a.U.')
+    stdout(f'threshold value: {round(args.thresh,3)} a.U.')
     
     outline, outl_vis, edge, bins = [], [], [], []
     
@@ -513,11 +501,8 @@ if __name__ == '__main__':
                             edge.append(coords[i,j,:])
                         outline.append(coords[i,j,:])
                         bins.append(tot_bin)
-                        #outl_vis.append(np.array([abs((coords[i,j,0]-parameters[4])/((parameters[6]-parameters[4])/parameters[0])),
-                        #                          parameters[1]-abs((coords[i,j,1]-parameters[5])/((parameters[7]-parameters[5])/parameters[1]))]))
             except IndexError:
                 pass
-    #outl_vis = np.array(outl_vis)
     
     if args.mindist == None:
         args.mindist = np.sqrt((parameters[6]-parameters[4])**2+(parameters[7]-parameters[5])**2)*0.02
@@ -540,13 +525,12 @@ if __name__ == '__main__':
             raise Exception(f'COLVAR-file and trajectory-file must have similar step length, here: {len(a)} vs {int((len(u.trajectory)-1)/args.stride+1)}')
     except (IndexError, ValueError):
         if args.traj[0].endswith('.pdb'):
-            frame_count = printout_pdb_cp2k_prework()
             format = 'cp2k_pdb'
         elif args.traj[0].endswith('.cfg'):
-            frame_count = printout_cfg_prework()
             format = 'cfg'
         else:
             raise Exception('MDAnalysis does not support this topology- or trajectory-file')
+        frame_count = printout_prework(format)
         if not int((frame_count-1)/args.stride+1) == len(a):
             raise Exception(f'COLVAR-file and trajectory-file must have similar step length, here: {len(a)} vs {int((frame_count-1)/args.stride+1)}')
     except FileNotFoundError:
@@ -560,7 +544,7 @@ if __name__ == '__main__':
     grouped_points = ex3(hash_list, new_dimX, args.mindist)
     grouped_points = [groups for groups in grouped_points if len(groups)>3]
     print('done')
-    print(f'time needed for CCL step: {round(perf_counter() - start0,3)} s')
+    stdout(f'time needed for CCL step: {round(perf_counter() - start0,3)} s')
     
     start1 = perf_counter()
     periodicity = False
@@ -592,25 +576,19 @@ if __name__ == '__main__':
                 if len(tmp_lst) == 1:
                     break
                 elif i == 0:
-                    print('periodicity detected: boundaries will be considered periodic')
+                    stdout('periodicity detected: boundaries will be considered periodic')
                 pbc.append(tmp_lst)
     print(str(len(grouped_points)), end = ' ')
-    if periodicity == True:
+    if periodicity:
         print('distinctive areas identified')
     else:
-        if len(grouped_points) == 1:
-            print('minimum identified')
-        else:
-            print('minima identified')
+        print('minimum identified') if len(grouped_points) == 1 else print('minima identified')
     
-        tot_min_frames = 0
+    tot_min_frames = 0
 
     all_points = hash_colv(parameters, a, b)
     
-    if len(grouped_points) > os.cpu_count()-1:
-        usable_cpu = os.cpu_count()-1
-    else:
-        usable_cpu = len(grouped_points)
+    usable_cpu = os.cpu_count()-1 if len(grouped_points)>os.cpu_count()-1 else len(grouped_points)
 
     exteriors_x, exteriors_y = [], []
     mp_sorted_coords = mp.Manager().list([[] for _ in range(len(grouped_points))])
@@ -625,9 +603,37 @@ if __name__ == '__main__':
         lists.sort()
         tot_min_frames += len(lists)
 
-    print(f'processed {len(a)} frames')
-    print(f'found {tot_min_frames} minima frames')
-    print(f'time needed for minima frames identification step: {round(perf_counter() - start1,3)} s')
+    stdout(f'processed {len(a)} frames')
+    stdout(f'found {tot_min_frames} minima frames')
+    if tot_min_frames/len(a) > 0.9:
+        stdout(f'WARNING: {round(tot_min_frames/len(a)*100)}% of frames part of minima, check if this really is what you want')
+    stdout(f'time needed for minima frames identification step: {round(perf_counter() - start1,3)} s')
+
+    try:
+        os.mkdir('minima')
+    except FileExistsError:
+        rmtree('minima')
+        os.mkdir('minima')
+
+    if not args.fes_png == 'False':
+        plt.figure(figsize=(8,6), dpi=300)
+        plt.imshow(ener2d, interpolation='none', cmap='nipy_spectral')
+        plt.xticks(np.linspace(-0.5,parameters[0]-0.5,5),np.round(np.linspace(parameters[4],parameters[6],5),3))
+        plt.yticks(np.linspace(-0.5,parameters[1]-0.5,5),np.round(np.linspace(parameters[7],parameters[5],5),3))
+        plt.xlabel('CV1 [a.U.]')
+        plt.ylabel('CV2 [a.U.]')
+        plt.axis('tight')
+        plt.title(f'threshold: {round(args.thresh,3)} a.U.')
+        for i in range(len(exteriors_x)):
+            plt.plot(exteriors_x[i], exteriors_y[i], '.', color='white', ms=2)
+        cb = plt.colorbar(label='free energy [a.U.]', format="{x:.0f}")
+        tick_locator = ticker.MaxNLocator(nbins=8)
+        cb.locator = tick_locator
+        cb.update_ticks()    
+        plt.savefig('minima/fes_visual.png',bbox_inches='tight')
+        if args.fes_png == 'only':
+            stdout(termin, center=True, start='\n')
+            exit()
     
     desc = []
     if periodicity == True:
@@ -649,32 +655,8 @@ if __name__ == '__main__':
                 sorted_coords_period.append(elem)
         sorted_indx = sorted_coords_period
         print(str(len(sorted_indx)), end=' ')
-        if len(sorted_indx) == 1:
-            print('minimum identified')
-        else:
-            print('minima identified')
-    try:
-        os.mkdir('minima')
-    except FileExistsError:
-        rmtree('minima')
-        os.mkdir('minima')
-
-    if args.fes_png == 'True':
-        plt.figure(figsize=(8,6), dpi=300)
-        plt.imshow(ener2d, interpolation='none', cmap='nipy_spectral')
-        plt.xticks(np.linspace(-0.5,parameters[0]-0.5,5),np.round(np.linspace(parameters[4],parameters[6],5),3))
-        plt.yticks(np.linspace(-0.5,parameters[1]-0.5,5),np.round(np.linspace(parameters[7],parameters[5],5),3))
-        plt.xlabel('CV1 [a.U.]')
-        plt.ylabel('CV2 [a.U.]')
-        plt.axis('tight')
-        plt.title(f'threshold: {round(args.thresh,3)} a.U.')
-        for i in range(len(exteriors_x)):
-            plt.plot(exteriors_x[i], exteriors_y[i], '.', color='white', ms=2)
-        cb = plt.colorbar(label='free energy [a.U.]', format="{x:.0f}")
-        tick_locator = ticker.MaxNLocator(nbins=8)
-        cb.locator = tick_locator
-        cb.update_ticks()    
-        plt.savefig('minima/fes_visual.png',bbox_inches='tight')
+        print('minimum identified') if len(sorted_indx) == 1 else print('minima identified')
+            
 
     start3 = perf_counter()
     with open('minima/min_overview.txt', 'w') as overviewfile:
@@ -691,5 +673,5 @@ if __name__ == '__main__':
         with mp.Pool(processes = usable_cpu, initializer=init_custom_writer, initargs=(sorted_indx,format,mp.RLock())) as pool:
             pool.map(printout_custom, range(len(sorted_indx)))
 
-    print(f'time needed for postprocessing step: {round(perf_counter() - start3,3)} s\n')
-    print(' '*int((terminal_size-len(termin))/2) + termin + ' '*int((terminal_size-len(termin))/2))
+    stdout(f'time needed for postprocessing step: {round(perf_counter() - start3,3)} s')
+    stdout(termin, center=True, start='\n')
