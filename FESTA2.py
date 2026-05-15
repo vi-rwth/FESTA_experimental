@@ -3,6 +3,7 @@ import os
 import tqdm
 import multiprocessing as mp
 import matplotlib.pyplot as plt
+import matplotlib.patheffects as pe
 import shapely.wkb
 import shapely
 
@@ -20,7 +21,6 @@ from MDAnalysis import Universe
 from collections import defaultdict
 from sys import exit
 from re import split
-
 
 filterwarnings('ignore', category=UserWarning)
 filterwarnings('ignore', category=RuntimeWarning)
@@ -704,8 +704,13 @@ if __name__ == '__main__':
         plt.ylabel('CV2 [a.U.]')
         plt.axis('tight')
         plt.title(f'threshold: {round(args.thresh,3)} a.U.')
-        for i in range(len(exteriors_x)):
-            plt.plot(exteriors_x[i], exteriors_y[i], '-', ms=1.5)
+        neon_colors = ['#39FF14','#FF00FF','#00FFFF','#FFFF00', 
+            '#FF3131','#FF9933','#B026FF']
+        
+        for i in range(len(exteriors_x)):   
+            plt.plot(exteriors_x[i], exteriors_y[i], '-', color=neon_colors[i%len(neon_colors)], 
+                linewidth=1, path_effects=[pe.Stroke(linewidth=2, foreground='white'), pe.Normal()])
+            
         cb = plt.colorbar(label='Energy [a.U.]', format="{x:.1f}")
         tick_locator = ticker.MaxNLocator(nbins=8)
         cb.locator = tick_locator
